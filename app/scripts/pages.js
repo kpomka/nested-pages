@@ -40,6 +40,26 @@
     };
 
     /**
+     * Returns url which activates page
+     * @returns {*}
+     */
+    routing.Page.prototype.getEntranceUrl = function () {
+        var sheetToBeActivated = this.sheets && this.sheets[0];
+        if (!sheetToBeActivated) throw 'Page ' + this.name + ' can not be activated';
+        return String.prototype.concat.call(!!this.url ? this.url : '', sheetToBeActivated.url);
+    };
+
+    /**
+     * Returns state which activates page
+     * @returns {*}
+     */
+    routing.Page.prototype.getEntrance = function () {
+        var sheetToBeActivated = this.sheets && this.sheets[0];
+        if (!sheetToBeActivated) throw 'Page ' + this.name + ' can not be activated';
+        return sheetToBeActivated.toState().name;
+    };
+
+    /**
      * Sheet object
      * @param parent
      * @constructor
@@ -90,6 +110,14 @@
     };
 
     /**
+     * Returns state which activates sheet
+     * @returns {*}
+     */
+    routing.Sheet.prototype.getEntrance = function () {
+        return this.toState().name;
+    };
+
+    /**
      * Encapsulates sheet's template decoration logic
      * @constructor
      */
@@ -104,7 +132,7 @@
      */
     routing.SheetTemplateDecorator.prototype.decorate = function (sheet) {
         var state = sheet.toState();
-        if (!!sheet.parent && sheet.parent instanceof routing.Page === false) {
+        if (sheet instanceof routing.Sheet) {
             state = angular.copy(sheet.toState());
             state.templateProvider = state.templateProvider || ['$templateFactory', function ($templateFactory) {
                 return routing.SheetTemplateDecorator.decorateByTemplate(sheet) ||
@@ -119,34 +147,56 @@
 
     /**
      * Decorates template string
-     * @param state
+     * @param sheet
      * @returns {*}
      */
-    routing.SheetTemplateDecorator.decorateByTemplate = function (state) {
-        return state.template && routing.SheetTemplateDecorator.decorateText(state.template);
+    routing.SheetTemplateDecorator.decorateByTemplate = function (sheet) {
+        return sheet.template && routing.SheetTemplateDecorator.decorateContent(sheet.template, sheet);
     };
 
     /**
      * Decorates template by url
-     * @param state
+     * @param sheet
      * @param $templateFactory
      * @returns {.views.templateUrl|*|templateUrl|F.templateUrl|r.templateUrl|derivedSyncDirective.templateUrl}
      */
-    routing.SheetTemplateDecorator.decorateByTemplateUrl = function (state, $templateFactory) {
-        return state.templateUrl &&
+    routing.SheetTemplateDecorator.decorateByTemplateUrl = function (sheet, $templateFactory) {
+        return sheet.templateUrl &&
             $templateFactory
-                .fromUrl(state.templateUrl)
+                .fromUrl(sheet.templateUrl)
                 .then(function (content) {
-                    return routing.SheetTemplateDecorator.decorateText(content);
+                    return routing.SheetTemplateDecorator.decorateContent(content, sheet);
                 });
     };
 
     /**
-     * Decorate template's text
+     * Decrate content depending on type of sheet
+     * @param content
+     * @param sheet
+     * @returns {*}
+     */
+    routing.SheetTemplateDecorator.decorateContent = function (content, sheet) {
+        if (!!sheet.parent && sheet.parent instanceof routing.Page === false) {
+            content = routing.SheetTemplateDecorator.surroundWithSheet(content);
+        }
+        content = routing.SheetTemplateDecorator.appendUiView(content);
+        return content;
+    };
+
+    /**
+     * Surround with <ft-sheet/> directive
      * @param content
      */
-    routing.SheetTemplateDecorator.decorateText = function (content) {
-        return String.prototype.concat.call('<sheet>', content, '</sheet><ui-view/>');
+    routing.SheetTemplateDecorator.surroundWithSheet = function (content) {
+        return String.prototype.concat.call('<ft-sheet>', content, '</ft-sheet>');
+    };
+
+    /**
+     * Append <ui-view/> directive at the end of content
+     * @param content
+     */
+    routing.SheetTemplateDecorator.appendUiView = function (content) {
+        return String.prototype.concat.call(content, '<ui-view/>');
     };
 
     /**
@@ -204,18 +254,6 @@
      * @constructor
      */
     routing.PageVisitor = function () {
-    };
-
-    /**
-     * Process page. Register state for page and all its sheets
-     * @param page
-     */
-    routing.PageVisitor.prototype.process = function (page) {
-        /*move this code to provider*/
-        var visitorFn = function (node) {
-            this.$stateProvider.state(this.decorator.decorate(node));
-        }.bind(this);
-        this.walk(page, visitorFn);
     };
 
     /**
@@ -302,6 +340,7 @@
         var page = this.factory.create(pageConfig, routing.rootState);
         this.visitor.walk(page, this.decorateAndRegister.bind(this));
         routing.pages.push(page);
+        routing.SiteMenu.add(page);
     };
 
     /**
@@ -346,26 +385,26 @@
     /**
      * Open page by name
      * @param name
+     * @param params
      */
-    PageService.prototype.open = function (name) {
+    PageService.prototype.open = function (name, params) {
         var stateName = String.prototype.concat.call(routing.rootState, '.', name);
-        this.$state.go(stateName);
+        this.$state.go(stateName, params);
     };
-
     /**
      * Perform sheet lookup
      * @param name
-     * @param current
+     * @param parent
      * @returns {*}
      */
-    PageService.prototype.get = function (name, current) {
-        current = current || angular.extend(new routing.Page(routing.rootState), {
+    PageService.prototype.get = function (name, parent) {
+        parent = parent || angular.extend(new routing.Page(routing.rootState), {
             name: '',
             sheets: routing.pages
         });
-        if (current.toState().name === name) return current;
-        for (var i = 0, len = current.sheets.length; i < len; ++i) {
-            var sheet = this.get(name, current.sheets[i]);
+        if (parent.toState().name === name) return parent;
+        for (var i = 0, len = parent.sheets.length; i < len; ++i) {
+            var sheet = this.get(name, parent.sheets[i]);
             if (sheet) return sheet;
         }
     };
@@ -397,6 +436,50 @@
         this.$state.go(parentState);
     };
 
+    /**
+     * SiteMenu object
+     * @constructor
+     */
+    function SiteMenu() {
+
+        /**
+         * Array of pages
+         * @type {Array}
+         */
+        this.pages = [];
+    }
+
+    SiteMenu.prototype.add = function (page) {
+        this.pages.push({
+            title: page.title || page.name,
+            entranceUrl: page.getEntranceUrl(),
+            entrance: page.getEntrance()
+        });
+    };
+
+    /**
+     * Sheet menu factory object
+     * @constructor
+     */
+    function SheetMenuFactory() {
+    };
+
+    /**
+     * Create sheet menu for page
+     * @param pageProxy
+     * @returns {Array}
+     */
+    SheetMenuFactory.prototype.create = function (pageProxy) {
+        var sheets = [];
+        pageProxy.page.sheets && angular.forEach(pageProxy.page.sheets, function (sheet) {
+            sheets.push({
+                title: sheet.title || sheet.name,
+                entrance: sheet.getEntrance()
+            });
+        });
+        return sheets;
+    };
+
     routing.Utils = {
 
         /**
@@ -418,9 +501,17 @@
     routing.PageProvider = ['$stateProvider', PageProvider];
     routing.PageService = ['$state', '$rootScope', PageService];
     routing.PageProxy = ['$state', 'page', PageProxy];
+    routing.SiteMenu = new SiteMenu();
+    var sheetMenuFactory = new SheetMenuFactory();
     routing.module.config(['$provide', '$compileProvider', function ($provide, $compileProvider) {
         $provide.provider('page', routing.PageProvider);
-        $compileProvider.directive('sheet', [function () {
+        $provide.factory('siteMenu', [function () {
+            return routing.SiteMenu;
+        }]);
+        $provide.factory('sheetMenuFactory', ['page', function(page){
+            return function(){ return sheetMenuFactory.create(page.current);}
+        }]);
+        $compileProvider.directive('ftSheet', [function () {
 
             return {
                 restrict: "E",
@@ -446,7 +537,7 @@
             $rootScope.$broadcast('page.open', changedToPage);
         });
 
-        $rootScope.$on('$stateChangeStart', function(){
+        $rootScope.$on('$stateChangeStart', function () {
         });
     }]);
 

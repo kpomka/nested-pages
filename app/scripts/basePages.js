@@ -23,8 +23,11 @@
                                     return api.getUser();
                                 }]
                             },
-                            controller: function($scope, user){
+                            controller: function($scope, user, page){
                                 $scope.user = user;
+                                $scope.close = function(){
+                                    page.current.close();
+                                };
                             }
                         },
                         {
@@ -54,6 +57,11 @@
                             controller: function($scope, property){
                                 $scope.property = property;
                             }
+                        },
+                        {
+                            abstract: true,
+                            name: 'app.property.baseLayout',
+                            template: '<ft-site-menu></ft-site-menu><ui-view/>'
                         }
                     ]
                 );
